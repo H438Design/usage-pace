@@ -1,0 +1,5 @@
+{
+  "name": "usage-pace",
+  "owner": { "name": "H438 Design" },
+  "plugins": [{ "name": "usage-pace", "source": "./" }]
+}
