@@ -123,13 +123,28 @@ async function pullShared($: EngineInterface) {
   }
 }
 
-/** This session's own latest reading (the status line's), if it has one that differs from what's shown. */
-async function pullOwn($: EngineInterface) {
+/** A window whose reset time has passed is over: its reading no longer applies. */
+const isLive = (w: Window, at: number) => !w.resetsAt || !(Date.parse(w.resetsAt) <= at)
+
+// This session's own reading as last seen (JSON). Only a change to it is news.
+// Comparing with what's shown instead made sessions with different readings
+// (one stale from before a reset) overwrite each other every 15 s.
+let lastOwn = ''
+
+/**
+ * This session's own latest reading (the status line's), shown and shared
+ * only when it has changed since this session last saw it. At session start
+ * (`isStart`) an existing shared reading wins: the own one may be from before
+ * the person was away.
+ */
+async function pullOwn($: EngineInterface, isStart = false) {
   try {
     const own = (await $.session.usage()).rateLimits.map(r => ({ ...r }))
     if (!own.length) return
-    const shown = await read($, windows)
-    if (JSON.stringify(own) === JSON.stringify(shown)) return
+    const json = JSON.stringify(own)
+    if (json === lastOwn) return
+    lastOwn = json
+    if (isStart && windowsAt > 0) return
     await update($, windows, () => own)
     await shareLimits($, own)
   } catch {
@@ -181,9 +196,9 @@ export const register: Register = on => {
     } catch {
       // no reading yet; session.measure fills it after the first reply
     }
-    // Start from this session's reading if it has one, else the newest any session saw.
-    await pullOwn($)
+    // Start from the newest reading any session shared, else this session's own.
     await pullShared($)
+    await pullOwn($, true)
     void checkForUpdate($)
     // Move the markers with the clock, and pick up readings this session's
     // status line or other chats made since.
@@ -211,6 +226,7 @@ export const register: Register = on => {
   on('session.measure', async ($, e, next) => {
     if (e.rateLimits.length) {
       const fresh = e.rateLimits.map(r => ({ ...r }))
+      lastOwn = JSON.stringify(fresh)
       await update($, windows, () => fresh)
       await shareLimits($, fresh)
     }
@@ -271,14 +287,14 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey || (await read($, isHidden))) return next(e)
+    const at = (await read($, now)) || Date.now()
     const list = (await read($, windows))
-      .filter(w => LENGTHS[w.kind])
+      .filter(w => LENGTHS[w.kind] && isLive(w, at))
       .sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind))
     const sess = await read($, session)
     const hasSession = sess.cacheAt !== null || sess.costTotal !== null
     if (!list.length && !hasSession) return next(e)
 
-    const at = (await read($, now)) || Date.now()
     const isAuto = await read($, autoHandoff)
     const sentAt = await read($, handoffSentAt)
     const ui = $.ui.resolve(e)
