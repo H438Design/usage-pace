@@ -1,6 +1,6 @@
 {
   "name": "usage-pace",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "One line above the prompt: prompt-cache countdown, session cost, and the 5-hour and weekly limits as pace bars, with optional auto handoff before the cache expires.",
   "types": "./types/index.d.ts"
 }

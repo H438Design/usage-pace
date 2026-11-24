@@ -123,6 +123,47 @@ async function pullShared($: EngineInterface) {
   }
 }
 
+/** This session's own latest reading (the status line's), if it has one that differs from what's shown. */
+async function pullOwn($: EngineInterface) {
+  try {
+    const own = (await $.session.usage()).rateLimits.map(r => ({ ...r }))
+    if (!own.length) return
+    const shown = await read($, windows)
+    if (JSON.stringify(own) === JSON.stringify(shown)) return
+    await update($, windows, () => own)
+    await shareLimits($, own)
+  } catch {
+    // no reading yet
+  }
+}
+
+// Update check: once a day, compare this copy's version with the one on GitHub.
+const REPO = 'H438Design/usage-pace'
+const UPDATE_CHECK_KEY = 'lastUpdateCheck'
+const DAY = 24 * HOUR
+const newer = (a: string, b: string) => {
+  const pa = a.split('.').map(Number)
+  const pb = b.split('.').map(Number)
+  for (let i = 0; i < 3; i++) if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) > (pb[i] ?? 0)
+  return false
+}
+async function checkForUpdate($: EngineInterface) {
+  try {
+    const last = Number((await $.store.get(UPDATE_CHECK_KEY)) ?? 0)
+    if (Date.now() - last < DAY) return
+    await $.store.set(UPDATE_CHECK_KEY, Date.now())
+    const mine = JSON.parse(await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`)).version as string
+    const res = await $.http.fetch(`https://raw.githubusercontent.com/${REPO}/main/.claude-plugin/plugin.json`)
+    if (!res.ok) return
+    const latest = JSON.parse(res.text).version as string
+    if (latest && mine && newer(latest, mine)) {
+      $.ui.toast(`usage-pace ${latest} is available (you have ${mine}). Update: claude plugin update usage-pace`)
+    }
+  } catch {
+    // offline or blocked: try again tomorrow
+  }
+}
+
 export const register: Register = on => {
   let turnStartCost: number | null = null
   // A turn is running (no auto handoff while busy).
@@ -140,11 +181,14 @@ export const register: Register = on => {
     } catch {
       // no reading yet; session.measure fills it after the first reply
     }
-    // Start from the newest reading any session saw.
+    // Start from this session's reading if it has one, else the newest any session saw.
+    await pullOwn($)
     await pullShared($)
-    // Move the markers and the cache bar with the clock, and pick up readings
-    // other chats made since.
+    void checkForUpdate($)
+    // Move the markers with the clock, and pick up readings this session's
+    // status line or other chats made since.
     $.clock.every(15_000, async () => {
+      await pullOwn($)
       await pullShared($)
       const t = await update($, now, () => Date.now())
       // Auto handoff: ticked, idle, 1-hour cache still warm with 5 minutes or less left, not yet sent.

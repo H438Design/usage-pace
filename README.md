@@ -32,7 +32,7 @@ Answer `y` to add the marketplace, then choose the **user** scope so it runs in 
 
 In the desktop app, where `/plugin` does not run: click + next to the prompt box, then Plugins, Add marketplace with `H438Design/usage-pace`, then Add plugin.
 
-Update: `claude plugin update usage-pace`. Turn off / on: `claude plugin disable usage-pace` / `claude plugin enable usage-pace`.
+Update: `claude plugin update usage-pace`. The mod checks GitHub once a day and shows a notice when a newer version is out. Turn off / on: `claude plugin disable usage-pace` / `claude plugin enable usage-pace`.
 
 ## Notes
 
