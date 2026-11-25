@@ -47,11 +47,15 @@ test('the line and its hover rows draw on every surface with a band', async ($, 
   for (const surface of ['terminal', 'desktop', 'mobile'] as const) {
     const ui = await $.ui.mount({ ...BAND, surface })
 
-    // The line: short labels, no pace numbers.
+    // The line: short labels, pace numbers until hover is seen working.
     expect(await ui.find({ type: 'Text', text: /^Cache 42m$/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /^5h 10%$/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /^Week 82%$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^5h 10% -30%$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^Week 82% \+\d+%$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^handoff/ })).toBeUndefined()
+    // The away-note toggle draws its box, not a label (the desktop app draws a label in its place).
+    const toggle = await ui.find({ type: 'Button', key: 'away-note' })
+    expect(String(toggle?.props.label ?? '')).not.toMatch(/Away note/)
+    expect(toggle?.text).toMatch(/☒/)
 
     // The hover rows, with live numbers.
     expect(await ui.find({ type: 'Text', text: /^Prompt cache: 42m left/ })).toBeDefined()

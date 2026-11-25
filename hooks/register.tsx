@@ -438,7 +438,6 @@ export const register: Register = on => {
             <Box flexShrink={0} hover={{ scope: tipScope('away') }}>
               <Button
                 key="away-note"
-                label={isAuto ? 'Away note: on' : 'Away note: off'}
                 plain
                 dimColor={!isAuto}
                 onPress={() => void update($, autoHandoff, v => !v)}
@@ -484,7 +483,10 @@ export const register: Register = on => {
       const recovery = recoveryPercent(w, at)
       const level = paceLevel(w.kind, used, pace, recovery)
       const label = LENGTHS[w.kind]?.label ?? w.kind
-      // The % takes the pace colour; how far over or under is in the hover row.
+      // + means ahead of even pace (using faster), - means behind. Kept on the
+      // line until the hover rows are seen working on the desktop app.
+      const gap = pace === null ? 0 : Math.round(used - pace)
+      const paceText = pace === null ? '' : gap === 0 ? ' ±0%' : ` ${gap > 0 ? '+' : '-'}${Math.abs(gap)}%`
       const markers: Marker[] = []
       if (pace !== null) markers.push({ at: pace, kind: 'pace' })
       if (recovery !== null) markers.push({ at: recovery, kind: 'recovery' })
@@ -512,9 +514,8 @@ export const register: Register = on => {
           <Box flexShrink={0}>
             <Text size="caption" wrap="truncate-end">
               <Text weight="semibold">{label}</Text>{' '}
-              <Text tabular color={w.isUnknown || pace === null ? undefined : level}>
-                {w.isUnknown ? '–' : `${used}%`}
-              </Text>
+              <Text tabular>{w.isUnknown ? '–' : `${used}%`}</Text>
+              <Text tabular color={level}>{paceText}</Text>
             </Text>
           </Box>
           <Box flexGrow={1} width={0}>
