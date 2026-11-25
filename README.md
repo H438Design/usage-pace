@@ -3,11 +3,11 @@
 A Claude Code mod: one line above the prompt that tells you whether you're using your subscription limits too fast, and when your prompt cache goes cold.
 
 ```
-Cache 42m ☒handoff  $0.20 · $2.60  Ctx 84k ▬▬▬▬▬      5h 10% -4%  ▬▬▬▬|▬▬▬▬▬▬▬  4:30 PM      Week 82% +3%  ▬▬▬▬▬▬▬▬|¦▬  Wed 11:00 PM
+Cache 42m ☒handoff  Ctx 84k ▬▬▬▬▬  $2.60      5h 10% -4%  ▬▬▬▬|▬▬▬▬▬▬▬  4:30 PM      Week 82% +3%  ▬▬▬▬▬▬▬▬|¦▬  Wed 11:00 PM
 ```
 
-- **Cache**: minutes left on the prompt cache (green), `cold` (blue) once it expired. Then last turn · session total, in USD.
-- **Ctx**: tokens in the conversation's context, with a short bar where full = 200k (too heavy: every reply re-reads all of it). Green below 110k (conversations start near 70k), yellow from 110k, red from 150k: time to start a fresh session.
+- **Cache**: minutes left on the prompt cache (green), `cold` (blue) once it expired.
+- **Ctx**: tokens in the conversation's context, with a short bar where full = 200k (too heavy: every reply re-reads all of it). Green below 110k (conversations start near 70k), yellow from 110k, red from 150k: time to start a fresh session. Then the session's total cost so far, in USD.
 - **5h / Week**: % used, then how far ahead (`+`) or behind (`-`) even, time-based use you are. The bar runs from the last reset to the next; the grey tick is even pace right now.
 - **Recovery tick (week only)**: the blue dashed tick is where even pace will be 8 hours from now. If your fill is at or left of it, stopping for the night gets you back on track by morning.
 - **Colours** follow pace, not total use: green up to 2% over pace, yellow up to the recovery tick, red past it. The 5-hour bar has no recovery tick and goes red at 15% over pace.

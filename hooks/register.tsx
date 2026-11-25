@@ -338,18 +338,11 @@ export const register: Register = on => {
     const isTerminal = e.surface === 'terminal'
     const hasSvg = !isTerminal && 'Svg' in ui
 
-    // Session: the cache bar shrinks as the cache ages (green) and turns blue
-    // once cold; then last turn · session total · next reply.
+    // Session: cache time (green, blue once cold) with the handoff toggle,
+    // then the context size and bar, then the session's total cost.
     const sessionCell = (s: Session) => {
       const leftMs = s.cacheAt === null ? 0 : s.cacheAt + s.cacheTtl - at
       const isCold = leftMs <= 0
-      // Last turn · session total.
-      const costs = [
-        s.costLast === null ? null : money(s.costLast),
-        s.costTotal === null ? null : money(s.costTotal),
-      ]
-        .filter(Boolean)
-        .join(' · ')
 
       // Context: the number, then a short bar out of CONTEXT_FULL.
       const ctx = s.contextTokens
@@ -385,11 +378,6 @@ export const register: Register = on => {
               <Text size="caption">{`handoff${sentAt ? ' ✓' : ''}`}</Text>
             </Button>
           </Box>
-          <Box flexShrink={0}>
-            <Text size="caption" tabular dimColor>
-              {costs}
-            </Text>
-          </Box>
           {ctx > 0 && (
             <Box flexDirection="row" alignItems="center" columnGap={1} flexShrink={0}>
               <Text size="caption">
@@ -401,6 +389,13 @@ export const register: Register = on => {
               <Box width={CONTEXT_BAR_CELLS} flexShrink={0}>
                 {ctxBar}
               </Box>
+            </Box>
+          )}
+          {s.costTotal !== null && (
+            <Box flexShrink={0}>
+              <Text size="caption" tabular dimColor>
+                {money(s.costTotal)}
+              </Text>
             </Box>
           )}
         </Box>
