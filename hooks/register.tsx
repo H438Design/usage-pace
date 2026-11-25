@@ -143,54 +143,44 @@ const isLive = (w: Window, at: number) => !w.resetsAt || !(Date.parse(w.resetsAt
 /** A window as drawn: a reading, or a stand-in (0% past its reset, '–' never read). */
 type Shown = Window & { isUnknown?: boolean }
 
-// Hover text. Each item on the line is a keyed Box holding a hidden card,
-// placed absolutely just above it, shown while the pointer is on the item.
-// The line never moves. The desktop app draws keyed-Box reveals in the band,
-// not `scope` groups (probed in 0.5.1). Surfaces without a pointer never show them.
-const TIP_WIDTH = 60
-/** Rows a tip wraps to at TIP_WIDTH, a little generous so the card clears the line. */
-const tipRows = (text: string) => Math.ceil(text.length / (TIP_WIDTH * 0.9))
+// The key: one ⓘ at the end of the line. While the pointer is on it, a small
+// card above the line shows one short line per item (live numbers). Hover on
+// each item popped up too often (0.5.2); only the ⓘ reacts now. The desktop
+// app reveals keyed-Box children, not `scope` groups. No pointer, no card.
 
 function cacheTip(s: Session, at: number): string {
-  if (s.cacheAt === null) return 'Prompt cache: starts with the first reply.'
+  if (s.cacheAt === null) return 'Cache: starts with the first reply'
   const left = s.cacheAt + s.cacheTtl - at
-  const life = s.cacheTtl >= HOUR ? 'an hour' : '5 minutes'
   return left > 0
-    ? `Prompt cache: ${timeLeft(left)} left (it lasts ${life} after each reply). Reply before then and the ` +
-        'conversation is re-read cheaply; once cold, the next reply costs more than 10 times as much to load it.'
-    : 'Prompt cache: cold. The next reply loads the whole conversation again at full cost; a fresh session may be cheaper.'
+    ? `Cache: ${timeLeft(left)} left · once cold, next reply ~10× cost`
+    : 'Cache: cold · next reply reloads at full cost'
 }
 
 function awayTip(isOn: boolean, sentAt: number): string {
-  const what = "if you're away and the cache has 5 minutes left, Claude writes a short handoff note (nothing is committed)"
-  if (!isOn) return `Away note: off. Click to turn on: ${what}.`
-  if (sentAt) return 'Away note: done for this time away (or you closed the session yourself). Your next message re-arms it. Click to turn off.'
-  return `Away note: on. ${what[0]!.toUpperCase()}${what.slice(1)}. Click to turn off.`
+  if (!isOn) return '☐ Away note off · click it to turn on'
+  if (sentAt) return '✓ Away note written · re-arms on your next message'
+  return '☒ Away note: handoff if you are away as the cache runs out'
 }
 
 const contextTip = (tokens: number) =>
-  `Context: ${kTokens(tokens)} of ${kTokens(CONTEXT_FULL)} tokens. Every reply re-reads all of it. ` +
-  `Yellow from ${kTokens(CONTEXT_YELLOW)}, red from ${kTokens(CONTEXT_RED)}: time for a fresh session.`
+  `Ctx: ${kTokens(tokens)} of ${kTokens(CONTEXT_FULL)} · red from ${kTokens(CONTEXT_RED)}: start fresh`
 
-const costTip = (usd: number) =>
-  `Session cost so far: ${money(usd)}, estimated at API list prices. Not billed on a subscription; it shows how heavy the session is.`
+const costTip = (usd: number) => `Cost: ${money(usd)} at API prices (not billed on a plan)`
 
 function windowTip(w: Shown, at: number): string {
-  const name = w.kind === 'five_hour' ? '5-hour limit' : w.kind === 'seven_day' ? 'Weekly limit' : w.kind
-  if (w.isUnknown) return `${name}: no reading yet. It shows after the next reply.`
-  if (!w.resetsAt) return `${name}: reset. The next window starts with your next message.`
+  const name = LENGTHS[w.kind]?.label ?? w.kind
+  if (w.isUnknown) return `${name}: no reading yet`
+  if (!w.resetsAt) return `${name}: reset · new window with your next message`
   const used = clamp(w.percentUsed)
-  const reset = ` Resets ${formatReset(w.resetsAt, w.kind)}.`
+  const reset = ` · resets ${formatReset(w.resetsAt, w.kind)}`
   const pace = pacePercent(w, at)
-  if (pace === null) return `${name}: ${used}% used.${reset}`
+  if (pace === null) return `${name}: ${used}% used${reset}`
   const diff = Math.round(used - pace)
-  const where = diff === 0 ? 'on pace' : diff > 0 ? `${diff}% over` : `${-diff}% under`
-  let tip = `${name}: ${used}% used. Steady use would be at ${Math.round(pace)}% now (grey tick), so you are ${where}.`
-  if (recoveryPercent(w, at) !== null) {
-    tip += ' Blue tick: where steady use will be in 8 hours; at or left of it, a night off gets you back on track.'
-  }
-  return `${tip} Colour: green on pace, yellow over, red far over.${reset}`
+  const where = diff === 0 ? 'on pace' : diff > 0 ? `${diff}% over pace` : `${-diff}% under pace`
+  return `${name}: ${used}% used · ${where}${reset}`
 }
+
+const LEGEND = 'Grey tick: steady pace · blue: pace after 8h off'
 
 // This session's own reading as last seen (JSON). Only a change to it is news.
 // Comparing with what's shown instead made sessions with different readings
@@ -396,23 +386,16 @@ export const register: Register = on => {
     const isTerminal = e.surface === 'terminal'
     const hasSvg = !isTerminal && 'Svg' in ui
 
-    // A hover card above an item: hidden until the pointer is on the item's keyed Box.
-    // The last window's card is held to the right edge so it is not cut off.
-    const card = (text: string, isRight = false) => (
-      <Box
-        position="absolute"
-        top={-tipRows(text)}
-        {...(isRight ? { right: 0 } : { left: 0 })}
-        width={TIP_WIDTH}
-        display="none"
-        hover={{ display: 'flex' }}
-        backgroundColor="background"
-      >
-        <Text size="caption" wrap="wrap">
-          {text}
-        </Text>
-      </Box>
-    )
+    // The key's lines, one per item shown, then the legend.
+    const lines: string[] = []
+    if (hasSession) {
+      lines.push(cacheTip(sess, at), awayTip(isAuto, sentAt))
+      if (sess.contextTokens > 0) lines.push(contextTip(sess.contextTokens))
+      if (sess.costTotal !== null) lines.push(costTip(sess.costTotal))
+    }
+    for (const w of list) lines.push(windowTip(w, at))
+    lines.push(LEGEND)
+    const keyWidth = Math.max(...lines.map(l => l.length)) + 2
 
     // Session: cache time (green, blue once cold) with the away-note toggle,
     // then the context size and bar, then the session's total cost.
@@ -438,16 +421,15 @@ export const register: Register = on => {
         <Box flexDirection="row" alignItems="center" columnGap={1} flexShrink={0}>
           {/* Cache time and its away-note toggle sit together, no gap. */}
           <Box flexDirection="row" alignItems="center" columnGap={0} flexShrink={0}>
-            <Box key="tip-cache" flexShrink={0}>
+            <Box flexShrink={0}>
               <Text size="caption">
                 <Text weight="semibold">Cache</Text>{' '}
                 <Text tabular color={isCold ? 'ide' : 'success'}>
                   {s.cacheAt === null ? '–' : isCold ? 'cold' : timeLeft(leftMs)}
                 </Text>
               </Text>
-              {card(cacheTip(s, at))}
             </Box>
-            <Box key="tip-away" flexShrink={0}>
+            <Box flexShrink={0}>
               <Button
                 key="away-note"
                 plain
@@ -457,11 +439,10 @@ export const register: Register = on => {
                 <Text size="heading">{isAuto ? ' ☒' : ' ☐'}</Text>
                 <Text size="caption">{sentAt ? '✓' : ''}</Text>
               </Button>
-              {card(awayTip(isAuto, sentAt))}
             </Box>
           </Box>
           {ctx > 0 && (
-            <Box key="tip-context" flexDirection="row" alignItems="center" columnGap={1} flexShrink={0}>
+            <Box flexDirection="row" alignItems="center" columnGap={1} flexShrink={0}>
               <Text size="caption">
                 <Text weight="semibold">Ctx</Text>{' '}
                 <Text tabular color={ctxLevel}>
@@ -471,15 +452,13 @@ export const register: Register = on => {
               <Box width={CONTEXT_BAR_CELLS} flexShrink={0}>
                 {ctxBar}
               </Box>
-              {card(contextTip(ctx))}
             </Box>
           )}
           {s.costTotal !== null && (
-            <Box key="tip-cost" flexShrink={0}>
+            <Box flexShrink={0}>
               <Text size="caption" tabular dimColor>
                 {money(s.costTotal)}
               </Text>
-              {card(costTip(s.costTotal))}
             </Box>
           )}
         </Box>
@@ -514,7 +493,6 @@ export const register: Register = on => {
           columnGap={1}
           flexGrow={SHARE[w.kind] ?? 1}
           width={0}
-          key={`tip-${w.kind}`}
         >
           <Box flexShrink={0}>
             <Text size="caption" wrap="truncate-end">
@@ -530,7 +508,6 @@ export const register: Register = on => {
               {formatReset(w.resetsAt, w.kind)}
             </Text>
           </Box>
-          {card(windowTip(w, at), w.kind === ORDER[ORDER.length - 1])}
         </Box>
       )
     }
@@ -539,6 +516,27 @@ export const register: Register = on => {
       <Box flexDirection="row" columnGap={3} width="100%">
         {hasSession && sessionCell(sess)}
         {list.map(cell)}
+        <Box key="key" flexShrink={0}>
+          <Text size="caption" dimColor>
+            ⓘ
+          </Text>
+          <Box
+            position="absolute"
+            top={-lines.length}
+            right={0}
+            width={keyWidth}
+            flexDirection="column"
+            display="none"
+            hover={{ display: 'flex' }}
+            backgroundColor="background"
+          >
+            {lines.map((l, i) => (
+              <Text key={`k${i}`} size="caption" wrap="truncate-end">
+                {l}
+              </Text>
+            ))}
+          </Box>
+        </Box>
       </Box>
     )
   })

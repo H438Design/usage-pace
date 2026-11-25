@@ -57,24 +57,21 @@ test('the line and its hover rows draw on every surface with a band', async ($, 
     expect(String(toggle?.props.label ?? '')).not.toMatch(/Away note/)
     expect(toggle?.text).toMatch(/☒/)
 
-    // The hover cards, with live numbers, each hidden in its item's keyed Box.
-    for (const key of ['tip-cache', 'tip-away', 'tip-context', 'tip-cost', 'tip-five_hour', 'tip-seven_day']) {
-      expect(await ui.find({ type: 'Box', key })).toBeDefined()
-    }
-    expect(await ui.find({ type: 'Text', text: /^Prompt cache: 42m left/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /^Away note: on\./ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /^Context: 84k of 200k tokens/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /^Session cost so far: \$2\.60/ })).toBeDefined()
-    expect(
-      await ui.find({ type: 'Text', text: /^5-hour limit: 10% used\. Steady use would be at 40% now \(grey tick\), so you are 30% under\./ }),
-    ).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /^Weekly limit: 82% used\..*so you are \d+% over\. Blue tick/ })).toBeDefined()
+    // The key behind the ⓘ: one short line per item, live numbers.
+    expect(await ui.find({ type: 'Box', key: 'key' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^Cache: 42m left · once cold/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^☒ Away note: handoff/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^Ctx: 84k of 200k/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^Cost: \$2\.60 at API prices/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^5h: 10% used · 30% under pace · resets / })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^Week: 82% used · \d+% over pace/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^Grey tick: steady pace/ })).toBeDefined()
 
     await ui.unmount()
   }
 })
 
-test('the away-note box toggles off with its hover text', async ($, on) => {
+test('the away-note box toggles off', async ($, on) => {
   const stored: Record<string, unknown> = { ...SEED }
   on('state.get', (_, e) => {
     const value = e.plugin === 'usage-pace' ? stored[e.key] : undefined
