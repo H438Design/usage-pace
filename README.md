@@ -3,14 +3,15 @@
 A Claude Code mod: one line above the prompt that tells you whether you're using your subscription limits too fast, and when your prompt cache goes cold.
 
 ```
-Cache 42m  ☒ handoff  $0.20 · $2.60      5h 10% -4%  ▬▬▬▬|▬▬▬▬▬▬▬  4:30 PM      Week 82% +3%  ▬▬▬▬▬▬▬▬|¦▬  Wed 11:00 PM
+Cache 42m ☒handoff  $0.20 · $2.60  Ctx 84k ▬▬▬▬▬      5h 10% -4%  ▬▬▬▬|▬▬▬▬▬▬▬  4:30 PM      Week 82% +3%  ▬▬▬▬▬▬▬▬|¦▬  Wed 11:00 PM
 ```
 
 - **Cache**: minutes left on the prompt cache (green), `cold` (blue) once it expired. Then last turn · session total, in USD.
+- **Ctx**: tokens in the conversation's context, with a short bar where full = 200k (too heavy: every reply re-reads all of it). Green below 110k (conversations start near 70k), yellow from 110k, red from 150k: time to start a fresh session.
 - **5h / Week**: % used, then how far ahead (`+`) or behind (`-`) even, time-based use you are. The bar runs from the last reset to the next; the grey tick is even pace right now.
 - **Recovery tick (week only)**: the blue dashed tick is where even pace will be 8 hours from now. If your fill is at or left of it, stopping for the night gets you back on track by morning.
 - **Colours** follow pace, not total use: green up to 2% over pace, yellow up to the recovery tick, red past it. The 5-hour bar has no recovery tick and goes red at 15% over pace.
-- **☒ handoff** (on by default, click to toggle): when the session has been idle and the 1-hour cache has 5 minutes left, the mod asks Claude to write a short handoff note while the cache is still cheap to read. Once per time away; your next message re-arms it. It uses the project's own handoff format when the project defines one (writing only the note, never committing or pushing), otherwise `handoffs/<topic>.md` or `HANDOFF.md`.
+- **☒ handoff** (on by default, click to toggle): when the session has been idle and the 1-hour cache has 5 minutes left, the mod asks Claude to write a short handoff note while the cache is still cheap to read. Once per time away; your next message re-arms it, except `end session`, `checkpoint` or `handoff`, which write their own handoff, so nothing fires after them. It uses the project's own handoff format when the project defines one (writing only the note, never committing or pushing), otherwise `handoffs/<topic>.md` or `HANDOFF.md`.
 - Every session shares its latest limit reading, so open sessions update when you use Claude Code elsewhere.
 - `/usage-bar` hides or shows the line.
 

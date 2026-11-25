@@ -25,6 +25,20 @@ const HANDOFF_LEAD_MS = 5 * 60_000
 const HANDOFF_PROMPT =
   'Auto handoff (usage-pace mod): the person has been away for almost an hour and the prompt cache ' +
   'expires in 5 minutes. Use the usage-pace:handoff skill now. Do not ask questions; the person is away.'
+// Prompts that close a session and write their own handoff: no auto handoff after them.
+const CLOSING = /^\s*\/?(end[\s_-]?session|checkpoint|handoff|usage-pace:handoff)\b/i
+
+// Context bar: 100% = 200k tokens, where a conversation is too heavy (every
+// reply re-reads all of it). Conversations start near 70k of standing
+// instructions; green to 110k, yellow to 150k (where the checkpoint reminder
+// fires), red past it.
+const CONTEXT_FULL = 200_000
+const CONTEXT_YELLOW = 110_000
+const CONTEXT_RED = 150_000
+const contextLevel = (t: number) => (t >= CONTEXT_RED ? 'error' : t >= CONTEXT_YELLOW ? 'warning' : 'success')
+const kTokens = (t: number) => `${Math.round(t / 1000)}k`
+// Box width numbers are text cells (~6 px on desktop): 12 cells ≈ 70 px.
+const CONTEXT_BAR_CELLS = 12
 
 const HOUR = 3_600_000
 const LENGTHS: Record<string, { ms: number; label: string }> = {
@@ -152,6 +166,18 @@ async function pullOwn($: EngineInterface, isStart = false) {
   }
 }
 
+/** The context size as the status line has it; catches /compact and /clear between replies. */
+async function pullContext($: EngineInterface) {
+  try {
+    const t = (await $.session.usage()).context.tokens
+    if (t === undefined) return
+    const s = await read($, session)
+    if (s.contextTokens !== t) await update($, session, v => ({ ...v, contextTokens: t }))
+  } catch {
+    // no reading yet
+  }
+}
+
 // Update check: once a day, compare this copy's version with the one on GitHub.
 const REPO = 'H438Design/usage-pace'
 const UPDATE_CHECK_KEY = 'lastUpdateCheck'
@@ -192,7 +218,11 @@ export const register: Register = on => {
     await update($, now, () => Date.now())
     try {
       const u = await $.session.usage()
-      if (u.cost) await update($, session, s => ({ ...s, costTotal: u.cost?.usd ?? s.costTotal }))
+      await update($, session, s => ({
+        ...s,
+        costTotal: u.cost?.usd ?? s.costTotal,
+        contextTokens: u.context.tokens ?? s.contextTokens,
+      }))
     } catch {
       // no reading yet; session.measure fills it after the first reply
     }
@@ -205,6 +235,7 @@ export const register: Register = on => {
     $.clock.every(15_000, async () => {
       await pullOwn($)
       await pullShared($)
+      await pullContext($)
       const t = await update($, now, () => Date.now())
       // Auto handoff: ticked, idle, 1-hour cache still warm with 5 minutes or less left, not yet sent.
       if (isBusy || !(await read($, autoHandoff)) || (await read($, handoffSentAt))) return
@@ -238,8 +269,13 @@ export const register: Register = on => {
   on('prompt.submit', async ($, e, next) => {
     isBusy = true
     turnStartCost = await readCost($)
-    // The person is back: arm auto handoff again for their next time away.
-    if (e.origin.kind === 'composer' || e.origin.kind === 'bridge') await update($, handoffSentAt, () => 0)
+    // The person is back: arm auto handoff again for their next time away,
+    // unless they are closing the session themselves (end session, checkpoint):
+    // that writes the handoff already, so auto handoff counts as done.
+    if (e.origin.kind === 'composer' || e.origin.kind === 'bridge') {
+      const isClosing = CLOSING.test(e.text) || CLOSING.test(e.command?.name ?? '')
+      await update($, handoffSentAt, () => (isClosing ? Date.now() : 0))
+    }
     return next(e)
   })
   // Main-loop requests only: when each went out (the cache lifetime counts from
@@ -315,25 +351,38 @@ export const register: Register = on => {
         .filter(Boolean)
         .join(' · ')
 
+      // Context: the number, then a short bar out of CONTEXT_FULL.
+      const ctx = s.contextTokens
+      const ctxLevel = contextLevel(ctx)
+      const ctxUsed = clamp((ctx / CONTEXT_FULL) * 100)
+      const ctxBar = hasSvg ? (
+        <ui.Svg
+          source={svgBar(ctxUsed, [], SVG_COLORS[ctxLevel] ?? WARM, BAR)}
+          alt={`Context: ${kTokens(ctx)} of ${kTokens(CONTEXT_FULL)} tokens`}
+          height={BAR.height}
+        />
+      ) : (
+        terminalBar(Box, ctxUsed, [], ctxLevel)
+      )
+
       return (
         <Box flexDirection="row" alignItems="center" columnGap={1} flexShrink={0}>
-          <Box flexShrink={0}>
+          {/* Cache time and its handoff toggle sit together, no gap. */}
+          <Box flexDirection="row" alignItems="center" columnGap={0} flexShrink={0}>
             <Text size="caption">
               <Text weight="semibold">Cache</Text>{' '}
               <Text tabular color={isCold ? 'ide' : 'success'}>
                 {s.cacheAt === null ? '–' : isCold ? 'cold' : timeLeft(leftMs)}
               </Text>
             </Text>
-          </Box>
-          <Box flexShrink={0}>
             <Button
               key="auto-handoff"
               plain
               dimColor={!isAuto}
               onPress={() => void update($, autoHandoff, v => !v)}
             >
-              <Text size="heading">{isAuto ? '☒' : '☐'}</Text>
-              <Text size="caption">{` handoff${sentAt ? ' ✓' : ''}`}</Text>
+              <Text size="heading">{isAuto ? ' ☒' : ' ☐'}</Text>
+              <Text size="caption">{`handoff${sentAt ? ' ✓' : ''}`}</Text>
             </Button>
           </Box>
           <Box flexShrink={0}>
@@ -341,6 +390,19 @@ export const register: Register = on => {
               {costs}
             </Text>
           </Box>
+          {ctx > 0 && (
+            <Box flexDirection="row" alignItems="center" columnGap={1} flexShrink={0}>
+              <Text size="caption">
+                <Text weight="semibold">Ctx</Text>{' '}
+                <Text tabular color={ctxLevel}>
+                  {kTokens(ctx)}
+                </Text>
+              </Text>
+              <Box width={CONTEXT_BAR_CELLS} flexShrink={0}>
+                {ctxBar}
+              </Box>
+            </Box>
+          )}
         </Box>
       )
     }
