@@ -6,7 +6,7 @@ A Claude Code mod: one line above the prompt that tells you whether you're using
 Cache 42m ☒  Ctx 84k ▬▬▬▬▬  $2.60      5h 10% -4%  ▬▬▬▬|▬▬▬▬▬▬▬  4:30 PM      Week 82% +3%  ▬▬▬▬▬▬▬▬|¦▬  Wed 11:00 PM
 ```
 
-**Hover text (in testing):** each item carries a line of explanation with live numbers, meant to show above the bar while the pointer is on the item. It does not show in the desktop app yet.
+**Hover text:** each item carries an explanation with live numbers (pace against steady use, reset time, what the colours mean). It shows in a small card above the bar while the pointer is on the item. Surfaces without a pointer do not show it.
 
 - **Cache**: minutes left on the prompt cache (green), `cold` (blue) once it expired.
 - **☒ (away note)**, on by default, click to toggle: when the session has been idle and the 1-hour cache has 5 minutes left, the mod asks Claude to write a short handoff note while the cache is still cheap to read. `✓` means it is done for this time away. Your next message re-arms it, except `end session`, `checkpoint` or `handoff`, which write their own handoff, so nothing fires after them. It uses the project's own handoff format when the project defines one (writing only the note, never committing or pushing), otherwise `handoffs/<topic>.md` or `HANDOFF.md`.

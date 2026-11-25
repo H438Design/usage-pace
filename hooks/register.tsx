@@ -143,11 +143,13 @@ const isLive = (w: Window, at: number) => !w.resetsAt || !(Date.parse(w.resetsAt
 /** A window as drawn: a reading, or a stand-in (0% past its reset, '–' never read). */
 type Shown = Window & { isUnknown?: boolean }
 
-// Hover text. Each item on the line joins a hover group (`scope`); the band
-// holds one hidden row per group above the line, shown while the pointer is on
-// that item or on the row itself. The line never moves and nothing is covered.
-// Surfaces without a pointer (the terminal's main screen, phones) never show them.
-const tipScope = (item: string) => `usage-pace-${item}`
+// Hover text. Each item on the line is a keyed Box holding a hidden card,
+// placed absolutely just above it, shown while the pointer is on the item.
+// The line never moves. The desktop app draws keyed-Box reveals in the band,
+// not `scope` groups (probed in 0.5.1). Surfaces without a pointer never show them.
+const TIP_WIDTH = 60
+/** Rows a tip wraps to at TIP_WIDTH, a little generous so the card clears the line. */
+const tipRows = (text: string) => Math.ceil(text.length / (TIP_WIDTH * 0.9))
 
 function cacheTip(s: Session, at: number): string {
   if (s.cacheAt === null) return 'Prompt cache: starts with the first reply.'
@@ -394,14 +396,23 @@ export const register: Register = on => {
     const isTerminal = e.surface === 'terminal'
     const hasSvg = !isTerminal && 'Svg' in ui
 
-    // Hover rows, one per item, hidden until the pointer is on that item.
-    const tips: { item: string; text: string }[] = []
-    if (hasSession) {
-      tips.push({ item: 'cache', text: cacheTip(sess, at) }, { item: 'away', text: awayTip(isAuto, sentAt) })
-      if (sess.contextTokens > 0) tips.push({ item: 'context', text: contextTip(sess.contextTokens) })
-      if (sess.costTotal !== null) tips.push({ item: 'cost', text: costTip(sess.costTotal) })
-    }
-    for (const w of list) tips.push({ item: w.kind, text: windowTip(w, at) })
+    // A hover card above an item: hidden until the pointer is on the item's keyed Box.
+    // The last window's card is held to the right edge so it is not cut off.
+    const card = (text: string, isRight = false) => (
+      <Box
+        position="absolute"
+        top={-tipRows(text)}
+        {...(isRight ? { right: 0 } : { left: 0 })}
+        width={TIP_WIDTH}
+        display="none"
+        hover={{ display: 'flex' }}
+        backgroundColor="background"
+      >
+        <Text size="caption" wrap="wrap">
+          {text}
+        </Text>
+      </Box>
+    )
 
     // Session: cache time (green, blue once cold) with the away-note toggle,
     // then the context size and bar, then the session's total cost.
@@ -427,15 +438,16 @@ export const register: Register = on => {
         <Box flexDirection="row" alignItems="center" columnGap={1} flexShrink={0}>
           {/* Cache time and its away-note toggle sit together, no gap. */}
           <Box flexDirection="row" alignItems="center" columnGap={0} flexShrink={0}>
-            <Box flexShrink={0} hover={{ scope: tipScope('cache') }}>
+            <Box key="tip-cache" flexShrink={0}>
               <Text size="caption">
                 <Text weight="semibold">Cache</Text>{' '}
                 <Text tabular color={isCold ? 'ide' : 'success'}>
                   {s.cacheAt === null ? '–' : isCold ? 'cold' : timeLeft(leftMs)}
                 </Text>
               </Text>
+              {card(cacheTip(s, at))}
             </Box>
-            <Box flexShrink={0} hover={{ scope: tipScope('away') }}>
+            <Box key="tip-away" flexShrink={0}>
               <Button
                 key="away-note"
                 plain
@@ -445,16 +457,11 @@ export const register: Register = on => {
                 <Text size="heading">{isAuto ? ' ☒' : ' ☐'}</Text>
                 <Text size="caption">{sentAt ? '✓' : ''}</Text>
               </Button>
+              {card(awayTip(isAuto, sentAt))}
             </Box>
           </Box>
           {ctx > 0 && (
-            <Box
-              flexDirection="row"
-              alignItems="center"
-              columnGap={1}
-              flexShrink={0}
-              hover={{ scope: tipScope('context') }}
-            >
+            <Box key="tip-context" flexDirection="row" alignItems="center" columnGap={1} flexShrink={0}>
               <Text size="caption">
                 <Text weight="semibold">Ctx</Text>{' '}
                 <Text tabular color={ctxLevel}>
@@ -464,13 +471,15 @@ export const register: Register = on => {
               <Box width={CONTEXT_BAR_CELLS} flexShrink={0}>
                 {ctxBar}
               </Box>
+              {card(contextTip(ctx))}
             </Box>
           )}
           {s.costTotal !== null && (
-            <Box flexShrink={0} hover={{ scope: tipScope('cost') }}>
+            <Box key="tip-cost" flexShrink={0}>
               <Text size="caption" tabular dimColor>
                 {money(s.costTotal)}
               </Text>
+              {card(costTip(s.costTotal))}
             </Box>
           )}
         </Box>
@@ -483,10 +492,6 @@ export const register: Register = on => {
       const recovery = recoveryPercent(w, at)
       const level = paceLevel(w.kind, used, pace, recovery)
       const label = LENGTHS[w.kind]?.label ?? w.kind
-      // + means ahead of even pace (using faster), - means behind. Kept on the
-      // line until the hover rows are seen working on the desktop app.
-      const gap = pace === null ? 0 : Math.round(used - pace)
-      const paceText = pace === null ? '' : gap === 0 ? ' ±0%' : ` ${gap > 0 ? '+' : '-'}${Math.abs(gap)}%`
       const markers: Marker[] = []
       if (pace !== null) markers.push({ at: pace, kind: 'pace' })
       if (recovery !== null) markers.push({ at: recovery, kind: 'recovery' })
@@ -509,13 +514,12 @@ export const register: Register = on => {
           columnGap={1}
           flexGrow={SHARE[w.kind] ?? 1}
           width={0}
-          hover={{ scope: tipScope(w.kind) }}
+          key={`tip-${w.kind}`}
         >
           <Box flexShrink={0}>
             <Text size="caption" wrap="truncate-end">
               <Text weight="semibold">{label}</Text>{' '}
               <Text tabular>{w.isUnknown ? '–' : `${used}%`}</Text>
-              <Text tabular color={level}>{paceText}</Text>
             </Text>
           </Box>
           <Box flexGrow={1} width={0}>
@@ -526,25 +530,15 @@ export const register: Register = on => {
               {formatReset(w.resetsAt, w.kind)}
             </Text>
           </Box>
+          {card(windowTip(w, at), w.kind === ORDER[ORDER.length - 1])}
         </Box>
       )
     }
 
-    // The hover rows sit above the line, so showing one never moves the item
-    // under the pointer; a row stays while the pointer is on it too.
     return (
-      <Box flexDirection="column" width="100%">
-        {tips.map(t => (
-          <Box display="none" hover={{ scope: tipScope(t.item), display: 'flex' }}>
-            <Text size="caption" wrap="wrap">
-              {t.text}
-            </Text>
-          </Box>
-        ))}
-        <Box flexDirection="row" columnGap={3} width="100%">
-          {hasSession && sessionCell(sess)}
-          {list.map(cell)}
-        </Box>
+      <Box flexDirection="row" columnGap={3} width="100%">
+        {hasSession && sessionCell(sess)}
+        {list.map(cell)}
       </Box>
     )
   })
