@@ -139,6 +139,8 @@ async function pullShared($: EngineInterface) {
 
 /** A window whose reset time has passed is over: its reading no longer applies. */
 const isLive = (w: Window, at: number) => !w.resetsAt || !(Date.parse(w.resetsAt) <= at)
+/** A window as drawn: a reading, or a stand-in (0% past its reset, '–' never read). */
+type Shown = Window & { isUnknown?: boolean }
 
 // This session's own reading as last seen (JSON). Only a change to it is news.
 // Comparing with what's shown instead made sessions with different readings
@@ -324,12 +326,18 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey || (await read($, isHidden))) return next(e)
     const at = (await read($, now)) || Date.now()
-    const list = (await read($, windows))
-      .filter(w => LENGTHS[w.kind] && isLive(w, at))
-      .sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind))
+    // Both windows always show. A window past its reset shows 0% (the next one
+    // starts with the next reply, which brings a new reading); one never read
+    // yet shows '–'. Hiding them made the 5h section vanish while away and be
+    // missing at startup until the first reply.
+    const readings = await read($, windows)
+    const list: Shown[] = ORDER.map(kind => {
+      const w = readings.find(r => r.kind === kind)
+      if (w && isLive(w, at)) return w
+      return { kind, percentUsed: 0, isUnknown: !w }
+    })
     const sess = await read($, session)
     const hasSession = sess.cacheAt !== null || sess.costTotal !== null
-    if (!list.length && !hasSession) return next(e)
 
     const isAuto = await read($, autoHandoff)
     const sentAt = await read($, handoffSentAt)
@@ -402,7 +410,7 @@ export const register: Register = on => {
       )
     }
 
-    const cell = (w: Window) => {
+    const cell = (w: Shown) => {
       const used = clamp(w.percentUsed)
       const pace = pacePercent(w, at)
       const diff = pace === null ? 0 : used - pace
@@ -432,7 +440,7 @@ export const register: Register = on => {
           <Box flexShrink={0}>
             <Text size="caption" wrap="truncate-end">
               <Text weight="semibold">{label}</Text>{' '}
-              <Text tabular>{used}%</Text>
+              <Text tabular>{w.isUnknown ? '–' : `${used}%`}</Text>
               <Text tabular color={level}>{paceText}</Text>
             </Text>
           </Box>
