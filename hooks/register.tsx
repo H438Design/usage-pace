@@ -18,14 +18,15 @@ const session = atom({ plugin: 'usage-pace', key: 'session' } as const, EMPTY_SE
 const autoHandoff = atom({ plugin: 'usage-pace', key: 'autoHandoff' } as const, true)
 const handoffSentAt = atom({ plugin: 'usage-pace', key: 'handoffSentAt' } as const, 0)
 
-// Auto handoff: with the 1-hour cache, once the session has sat idle until 5
-// minutes are left, one prompt runs the handoff skill while the cache is still
-// cheap to read. Once per stretch away: the person's next prompt re-arms it.
+// Away note (the ☒ next to the cache time; `autoHandoff` in the store): with the
+// 1-hour cache, once the session has sat idle until 5 minutes are left, one
+// prompt runs the handoff skill while the cache is still cheap to read. Once per
+// stretch away: the person's next prompt re-arms it.
 const HANDOFF_LEAD_MS = 5 * 60_000
 const HANDOFF_PROMPT =
-  'Auto handoff (usage-pace mod): the person has been away for almost an hour and the prompt cache ' +
+  'Away note (usage-pace mod): the person has been away for almost an hour and the prompt cache ' +
   'expires in 5 minutes. Use the usage-pace:handoff skill now. Do not ask questions; the person is away.'
-// Prompts that close a session and write their own handoff: no auto handoff after them.
+// Prompts that close a session and write their own handoff: no away note after them.
 const CLOSING = /^\s*\/?(end[\s_-]?session|checkpoint|handoff|usage-pace:handoff)\b/i
 
 // Context bar: 100% = 200k tokens, where a conversation is too heavy (every
@@ -142,6 +143,53 @@ const isLive = (w: Window, at: number) => !w.resetsAt || !(Date.parse(w.resetsAt
 /** A window as drawn: a reading, or a stand-in (0% past its reset, '–' never read). */
 type Shown = Window & { isUnknown?: boolean }
 
+// Hover text. Each item on the line joins a hover group (`scope`); the band
+// holds one hidden row per group above the line, shown while the pointer is on
+// that item or on the row itself. The line never moves and nothing is covered.
+// Surfaces without a pointer (the terminal's main screen, phones) never show them.
+const tipScope = (item: string) => `usage-pace-${item}`
+
+function cacheTip(s: Session, at: number): string {
+  if (s.cacheAt === null) return 'Prompt cache: starts with the first reply.'
+  const left = s.cacheAt + s.cacheTtl - at
+  const life = s.cacheTtl >= HOUR ? 'an hour' : '5 minutes'
+  return left > 0
+    ? `Prompt cache: ${timeLeft(left)} left (it lasts ${life} after each reply). Reply before then and the ` +
+        'conversation is re-read cheaply; once cold, the next reply costs more than 10 times as much to load it.'
+    : 'Prompt cache: cold. The next reply loads the whole conversation again at full cost; a fresh session may be cheaper.'
+}
+
+function awayTip(isOn: boolean, sentAt: number): string {
+  const what = "if you're away and the cache has 5 minutes left, Claude writes a short handoff note (nothing is committed)"
+  if (!isOn) return `Away note: off. Click to turn on: ${what}.`
+  if (sentAt) return 'Away note: done for this time away (or you closed the session yourself). Your next message re-arms it. Click to turn off.'
+  return `Away note: on. ${what[0]!.toUpperCase()}${what.slice(1)}. Click to turn off.`
+}
+
+const contextTip = (tokens: number) =>
+  `Context: ${kTokens(tokens)} of ${kTokens(CONTEXT_FULL)} tokens. Every reply re-reads all of it. ` +
+  `Yellow from ${kTokens(CONTEXT_YELLOW)}, red from ${kTokens(CONTEXT_RED)}: time for a fresh session.`
+
+const costTip = (usd: number) =>
+  `Session cost so far: ${money(usd)}, estimated at API list prices. Not billed on a subscription; it shows how heavy the session is.`
+
+function windowTip(w: Shown, at: number): string {
+  const name = w.kind === 'five_hour' ? '5-hour limit' : w.kind === 'seven_day' ? 'Weekly limit' : w.kind
+  if (w.isUnknown) return `${name}: no reading yet. It shows after the next reply.`
+  if (!w.resetsAt) return `${name}: reset. The next window starts with your next message.`
+  const used = clamp(w.percentUsed)
+  const reset = ` Resets ${formatReset(w.resetsAt, w.kind)}.`
+  const pace = pacePercent(w, at)
+  if (pace === null) return `${name}: ${used}% used.${reset}`
+  const diff = Math.round(used - pace)
+  const where = diff === 0 ? 'on pace' : diff > 0 ? `${diff}% over` : `${-diff}% under`
+  let tip = `${name}: ${used}% used. Steady use would be at ${Math.round(pace)}% now (grey tick), so you are ${where}.`
+  if (recoveryPercent(w, at) !== null) {
+    tip += ' Blue tick: where steady use will be in 8 hours; at or left of it, a night off gets you back on track.'
+  }
+  return `${tip} Colour: green on pace, yellow over, red far over.${reset}`
+}
+
 // This session's own reading as last seen (JSON). Only a change to it is news.
 // Comparing with what's shown instead made sessions with different readings
 // (one stale from before a reset) overwrite each other every 15 s.
@@ -209,7 +257,7 @@ async function checkForUpdate($: EngineInterface) {
 
 export const register: Register = on => {
   let turnStartCost: number | null = null
-  // A turn is running (no auto handoff while busy).
+  // A turn is running (no away note while busy).
   let isBusy = false
 
   on('session.start', async ($, e, next) => {
@@ -239,7 +287,7 @@ export const register: Register = on => {
       await pullShared($)
       await pullContext($)
       const t = await update($, now, () => Date.now())
-      // Auto handoff: ticked, idle, 1-hour cache still warm with 5 minutes or less left, not yet sent.
+      // Away note: ticked, idle, 1-hour cache still warm with 5 minutes or less left, not yet sent.
       if (isBusy || !(await read($, autoHandoff)) || (await read($, handoffSentAt))) return
       const s = await read($, session)
       if (s.cacheAt === null || s.cacheTtl !== HOUR) return
@@ -271,9 +319,9 @@ export const register: Register = on => {
   on('prompt.submit', async ($, e, next) => {
     isBusy = true
     turnStartCost = await readCost($)
-    // The person is back: arm auto handoff again for their next time away,
+    // The person is back: arm the away note again for their next time away,
     // unless they are closing the session themselves (end session, checkpoint):
-    // that writes the handoff already, so auto handoff counts as done.
+    // that writes the handoff already, so the away note counts as done.
     if (e.origin.kind === 'composer' || e.origin.kind === 'bridge') {
       const isClosing = CLOSING.test(e.text) || CLOSING.test(e.command?.name ?? '')
       await update($, handoffSentAt, () => (isClosing ? Date.now() : 0))
@@ -346,7 +394,16 @@ export const register: Register = on => {
     const isTerminal = e.surface === 'terminal'
     const hasSvg = !isTerminal && 'Svg' in ui
 
-    // Session: cache time (green, blue once cold) with the handoff toggle,
+    // Hover rows, one per item, hidden until the pointer is on that item.
+    const tips: { item: string; text: string }[] = []
+    if (hasSession) {
+      tips.push({ item: 'cache', text: cacheTip(sess, at) }, { item: 'away', text: awayTip(isAuto, sentAt) })
+      if (sess.contextTokens > 0) tips.push({ item: 'context', text: contextTip(sess.contextTokens) })
+      if (sess.costTotal !== null) tips.push({ item: 'cost', text: costTip(sess.costTotal) })
+    }
+    for (const w of list) tips.push({ item: w.kind, text: windowTip(w, at) })
+
+    // Session: cache time (green, blue once cold) with the away-note toggle,
     // then the context size and bar, then the session's total cost.
     const sessionCell = (s: Session) => {
       const leftMs = s.cacheAt === null ? 0 : s.cacheAt + s.cacheTtl - at
@@ -368,26 +425,37 @@ export const register: Register = on => {
 
       return (
         <Box flexDirection="row" alignItems="center" columnGap={1} flexShrink={0}>
-          {/* Cache time and its handoff toggle sit together, no gap. */}
+          {/* Cache time and its away-note toggle sit together, no gap. */}
           <Box flexDirection="row" alignItems="center" columnGap={0} flexShrink={0}>
-            <Text size="caption">
-              <Text weight="semibold">Cache</Text>{' '}
-              <Text tabular color={isCold ? 'ide' : 'success'}>
-                {s.cacheAt === null ? '–' : isCold ? 'cold' : timeLeft(leftMs)}
+            <Box flexShrink={0} hover={{ scope: tipScope('cache') }}>
+              <Text size="caption">
+                <Text weight="semibold">Cache</Text>{' '}
+                <Text tabular color={isCold ? 'ide' : 'success'}>
+                  {s.cacheAt === null ? '–' : isCold ? 'cold' : timeLeft(leftMs)}
+                </Text>
               </Text>
-            </Text>
-            <Button
-              key="auto-handoff"
-              plain
-              dimColor={!isAuto}
-              onPress={() => void update($, autoHandoff, v => !v)}
-            >
-              <Text size="heading">{isAuto ? ' ☒' : ' ☐'}</Text>
-              <Text size="caption">{`handoff${sentAt ? ' ✓' : ''}`}</Text>
-            </Button>
+            </Box>
+            <Box flexShrink={0} hover={{ scope: tipScope('away') }}>
+              <Button
+                key="away-note"
+                label={isAuto ? 'Away note: on' : 'Away note: off'}
+                plain
+                dimColor={!isAuto}
+                onPress={() => void update($, autoHandoff, v => !v)}
+              >
+                <Text size="heading">{isAuto ? ' ☒' : ' ☐'}</Text>
+                <Text size="caption">{sentAt ? '✓' : ''}</Text>
+              </Button>
+            </Box>
           </Box>
           {ctx > 0 && (
-            <Box flexDirection="row" alignItems="center" columnGap={1} flexShrink={0}>
+            <Box
+              flexDirection="row"
+              alignItems="center"
+              columnGap={1}
+              flexShrink={0}
+              hover={{ scope: tipScope('context') }}
+            >
               <Text size="caption">
                 <Text weight="semibold">Ctx</Text>{' '}
                 <Text tabular color={ctxLevel}>
@@ -400,7 +468,7 @@ export const register: Register = on => {
             </Box>
           )}
           {s.costTotal !== null && (
-            <Box flexShrink={0}>
+            <Box flexShrink={0} hover={{ scope: tipScope('cost') }}>
               <Text size="caption" tabular dimColor>
                 {money(s.costTotal)}
               </Text>
@@ -413,13 +481,10 @@ export const register: Register = on => {
     const cell = (w: Shown) => {
       const used = clamp(w.percentUsed)
       const pace = pacePercent(w, at)
-      const diff = pace === null ? 0 : used - pace
       const recovery = recoveryPercent(w, at)
       const level = paceLevel(w.kind, used, pace, recovery)
       const label = LENGTHS[w.kind]?.label ?? w.kind
-      const gap = Math.abs(Math.round(diff))
-      // + means ahead of even pace (using faster), - means behind.
-      const paceText = pace === null ? '' : gap === 0 ? ' ±0%' : ` ${diff > 0 ? '+' : '-'}${gap}%`
+      // The % takes the pace colour; how far over or under is in the hover row.
       const markers: Marker[] = []
       if (pace !== null) markers.push({ at: pace, kind: 'pace' })
       if (recovery !== null) markers.push({ at: recovery, kind: 'recovery' })
@@ -436,12 +501,20 @@ export const register: Register = on => {
 
       // One section per window: text, then the bar filling the rest, then the reset time.
       return (
-        <Box flexDirection="row" alignItems="center" columnGap={1} flexGrow={SHARE[w.kind] ?? 1} width={0}>
+        <Box
+          flexDirection="row"
+          alignItems="center"
+          columnGap={1}
+          flexGrow={SHARE[w.kind] ?? 1}
+          width={0}
+          hover={{ scope: tipScope(w.kind) }}
+        >
           <Box flexShrink={0}>
             <Text size="caption" wrap="truncate-end">
               <Text weight="semibold">{label}</Text>{' '}
-              <Text tabular>{w.isUnknown ? '–' : `${used}%`}</Text>
-              <Text tabular color={level}>{paceText}</Text>
+              <Text tabular color={w.isUnknown || pace === null ? undefined : level}>
+                {w.isUnknown ? '–' : `${used}%`}
+              </Text>
             </Text>
           </Box>
           <Box flexGrow={1} width={0}>
@@ -456,10 +529,21 @@ export const register: Register = on => {
       )
     }
 
+    // The hover rows sit above the line, so showing one never moves the item
+    // under the pointer; a row stays while the pointer is on it too.
     return (
-      <Box flexDirection="row" columnGap={3} width="100%">
-        {hasSession && sessionCell(sess)}
-        {list.map(cell)}
+      <Box flexDirection="column" width="100%">
+        {tips.map(t => (
+          <Box display="none" hover={{ scope: tipScope(t.item), display: 'flex' }}>
+            <Text size="caption" wrap="wrap">
+              {t.text}
+            </Text>
+          </Box>
+        ))}
+        <Box flexDirection="row" columnGap={3} width="100%">
+          {hasSession && sessionCell(sess)}
+          {list.map(cell)}
+        </Box>
       </Box>
     )
   })

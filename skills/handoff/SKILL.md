@@ -1,6 +1,6 @@
 ---
 name: handoff
-description: Write a short handoff note so the work can resume in a fresh session. Used by the usage-pace mod's auto handoff when the person is away and the prompt cache is about to expire; the person can also ask for it by name.
+description: Write a short handoff note so the work can resume in a fresh session. Used by the usage-pace mod's away note when the person is away and the prompt cache is about to expire; the person can also ask for it by name.
 ---
 
 # Handoff
@@ -20,7 +20,7 @@ Write to `handoffs/<short-topic>.md` if a `handoffs/` folder exists in the worki
 ```markdown
 # <topic>
 
-Updated: <YYYY-MM-DD HH:MM> · Auto handoff (person away)
+Updated: <YYYY-MM-DD HH:MM> · Away note (person away)
 
 ## Goal
 <one or two lines>

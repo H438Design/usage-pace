@@ -22,9 +22,9 @@ declare module 'claude-code' {
       now: number
       isHidden: boolean
       session: Session
-      /** Auto handoff ticked for this session (on at each new session). */
+      /** Away note ticked for this session (on at each new session). */
       autoHandoff: boolean
-      /** When auto handoff last sent its prompt (ms), 0 if not since the person's last prompt. */
+      /** When the away note last sent its prompt (ms), 0 if not since the person's last prompt. */
       handoffSentAt: number
     }
   }
