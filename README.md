@@ -3,15 +3,15 @@
 A Claude Code mod: one line above the prompt that tells you whether you're using your subscription limits too fast, and when your prompt cache goes cold.
 
 ```
-Cache 42m ☒  Ctx 84k ▬▬▬▬▬  $2.60      5h 10% -4%  ▬▬▬▬|▬▬▬▬▬▬▬  4:30 PM      Week 82% +3%  ▬▬▬▬▬▬▬▬|¦▬  Wed 11:00 PM
+Cache 42m ☒  Ctx 84k ▬▬▬▬▬  $2.60      5h 10%  ▬▬▬▬|▬▬▬▬▬▬▬  2:47      Week 82% +3%  ▬▬▬▬▬▬▬▬|¦▬  3d 7h      ⓘ
 ```
 
 **Key (ⓘ):** point at the ⓘ at the end of the bar to see a small card with one line per item, live numbers included (pace against steady use, reset times, what the ticks mean). Nothing else on the bar pops up. Surfaces without a pointer do not show it.
 
 - **Cache**: minutes left on the prompt cache (green), `cold` (blue) once it expired.
-- **☒ (away note)**, on by default, click to toggle: when the session has been idle and the 1-hour cache has 5 minutes left, the mod asks Claude to write a short handoff note while the cache is still cheap to read. `✓` means it is done for this time away. Your next message re-arms it, except `end session`, `checkpoint` or `handoff`, which write their own handoff, so nothing fires after them. It uses the project's own handoff format when the project defines one (writing only the note, never committing or pushing), otherwise `handoffs/<topic>.md` or `HANDOFF.md`.
+- **☒ (away note)**, on by default, click to toggle: when the session has been idle and the 1-hour cache has 5 minutes left, the mod asks Claude to write a short handoff note while the cache is still cheap to read. `✓` means it is done for this time away. Your next message re-arms it. When the `end-session`, `checkpoint` or `handoff` skill runs (however you asked for it), its handoff counts, so nothing fires after it. It uses the project's own handoff format when the project defines one (writing only the note, never committing or pushing), otherwise `handoffs/<topic>.md` or `HANDOFF.md`.
 - **Ctx**: tokens in the conversation's context, with a short bar where full = 200k (too heavy: every reply re-reads all of it). Green below 110k, yellow from 110k, red from 150k: time to start a fresh session. Then the session's total cost so far, in USD, at API list prices.
-- **5h / Week**: % used, then how far over (`+`) or under (`-`) steady use you are. The bar runs from the last reset to the next; the grey tick is where steady use would be right now.
+- **5h / Week**: % used; Week also shows how far over (`+`) or under (`-`) steady use you are (5h has it in the key card). The bar runs from the last reset to the next; the grey tick is where steady use would be right now. After the bar, the time left until the reset: 5h as `h:mm` (`2:47`); Week as days and hours (`3d 7h`) from one day up, `h:mm` under a day. The key card gives the reset clock time.
 - **Recovery tick (week only)**: the blue dashed tick is where steady use will be 8 hours from now. If your fill is at or left of it, stopping for the night gets you back on track by morning.
 - **Colours** follow pace, not total use: green up to 2% over steady use, yellow up to the recovery tick, red past it. The 5-hour bar has no recovery tick and goes red at 15% over.
 - Every session shares its latest limit reading, so open sessions update when you use Claude Code elsewhere.

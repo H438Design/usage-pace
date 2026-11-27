@@ -47,10 +47,14 @@ test('the line and its hover rows draw on every surface with a band', async ($, 
   for (const surface of ['terminal', 'desktop', 'mobile'] as const) {
     const ui = await $.ui.mount({ ...BAND, surface })
 
-    // The line: short labels, no pace numbers (they are in the hover cards).
+    // The line: short labels; the 5h pace number is in the key card only.
     expect(await ui.find({ type: 'Text', text: /^Cache 42m$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^5h 10%$/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /^Week 82%$/ })).toBeDefined()
+    // Week only: over/under steady use after the % (73 h of 168 in: steady 43%, so +39%).
+    expect(await ui.find({ type: 'Text', text: /^Week 82% \+39%$/ })).toBeDefined()
+    // Time to reset: 5h h:mm; week 3d 23h from one day up.
+    expect(await ui.find({ type: 'Text', text: /^3:00$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^3d 23h$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^handoff/ })).toBeUndefined()
     // The away-note toggle draws its box, not a label (the desktop app draws a label in its place).
     const toggle = await ui.find({ type: 'Button', key: 'away-note' })

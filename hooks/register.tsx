@@ -26,8 +26,10 @@ const HANDOFF_LEAD_MS = 5 * 60_000
 const HANDOFF_PROMPT =
   'Away note (usage-pace mod): the person has been away for almost an hour and the prompt cache ' +
   'expires in 5 minutes. Use the usage-pace:handoff skill now. Do not ask questions; the person is away.'
-// Prompts that close a session and write their own handoff: no away note after them.
-const CLOSING = /^\s*\/?(end[\s_-]?session|checkpoint|handoff|usage-pace:handoff)\b/i
+// Skills that write a handoff themselves: once one runs, the away note counts as done,
+// however the person asked for it (the wording of a message is not checked: it may
+// only mention ending). Plugin skills arrive as `plugin:name`.
+const CLOSING_SKILL = /(^|:)(end-session|checkpoint|handoff)$/i
 
 // Context bar: 100% = 200k tokens, where a conversation is too heavy (every
 // reply re-reads all of it). Conversations start near 70k of standing
@@ -105,7 +107,29 @@ function formatReset(iso: string | undefined, kind: string): string {
   return kind === 'five_hour' ? time : `${DAYS[d.getDay()]} ${time}`
 }
 
-type CostReader = { session: { usage: () => Promise<{ cost?: { usd: number } }> } }
+/**
+ * Time left until the window resets, for the bar: 5h `h:mm` (`2:47`); week
+ * `3d 7h` from one day up, `h:mm` under a day. No leading zeros on hours or days.
+ * Empty when there is no reset time or it passed.
+ */
+export function formatCountdown(iso: string | undefined, kind: string, at: number): string {
+  if (!iso) return ''
+  const ms = Date.parse(iso) - at
+  if (!Number.isFinite(ms) || ms <= 0) return ''
+  const mins = Math.floor(ms / 60_000)
+  const hours = Math.floor(mins / 60)
+  if (kind !== 'five_hour' && hours >= 24) return `${Math.floor(hours / 24)}d ${hours % 24}h`
+  return `${hours}:${String(mins % 60).padStart(2, '0')}`
+}
+
+/** Week only, on the bar: `+3%` over or `-6%` under steady use, empty on pace or unknown. */
+export function paceDelta(used: number, pace: number | null): string {
+  if (pace === null) return ''
+  const diff = Math.round(used - pace)
+  return diff === 0 ? '' : diff > 0 ? `+${diff}%` : `${diff}%`
+}
+
+type CostReader ={ session: { usage: () => Promise<{ cost?: { usd: number } }> } }
 async function readCost($: CostReader): Promise<number | null> {
   try {
     return (await $.session.usage()).cost?.usd ?? null
@@ -311,13 +335,19 @@ export const register: Register = on => {
   on('prompt.submit', async ($, e, next) => {
     isBusy = true
     turnStartCost = await readCost($)
-    // The person is back: arm the away note again for their next time away,
-    // unless they are closing the session themselves (end session, checkpoint):
-    // that writes the handoff already, so the away note counts as done.
+    // The person is back: arm the away note again for their next time away.
+    // If this message closes the session, the closing skill disarms it again
+    // (`skill.prompt` below).
     if (e.origin.kind === 'composer' || e.origin.kind === 'bridge') {
-      const isClosing = CLOSING.test(e.text) || CLOSING.test(e.command?.name ?? '')
-      await update($, handoffSentAt, () => (isClosing ? Date.now() : 0))
+      await update($, handoffSentAt, () => 0)
     }
+    return next(e)
+  })
+
+  // A closing skill ran (end-session, checkpoint, handoff; typed or via the Skill
+  // tool): its handoff is written, so no away note until the person's next message.
+  on('skill.prompt', async ($, e, next) => {
+    if (CLOSING_SKILL.test(e.skill)) await update($, handoffSentAt, () => Date.now())
     return next(e)
   })
   // Main-loop requests only: when each went out (the cache lifetime counts from
@@ -485,7 +515,7 @@ export const register: Register = on => {
         terminalBar(Box, used, markers, level)
       )
 
-      // One section per window: text, then the bar filling the rest, then the reset time.
+      // One section per window: text, then the bar filling the rest, then the time to reset.
       return (
         <Box
           flexDirection="row"
@@ -498,14 +528,20 @@ export const register: Register = on => {
             <Text size="caption" wrap="truncate-end">
               <Text weight="semibold">{label}</Text>{' '}
               <Text tabular>{w.isUnknown ? '–' : `${used}%`}</Text>
+              {w.kind === 'seven_day' && !w.isUnknown && paceDelta(used, pace) && (
+                <Text tabular dimColor>
+                  {' '}
+                  {paceDelta(used, pace)}
+                </Text>
+              )}
             </Text>
           </Box>
           <Box flexGrow={1} width={0}>
             {bar}
           </Box>
           <Box flexShrink={0}>
-            <Text size="caption" dimColor>
-              {formatReset(w.resetsAt, w.kind)}
+            <Text size="caption" dimColor tabular>
+              {formatCountdown(w.resetsAt, w.kind, at)}
             </Text>
           </Box>
         </Box>
